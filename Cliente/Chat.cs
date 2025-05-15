@@ -15,12 +15,12 @@ namespace Cliente
         private StreamReader reader;
         private StreamWriter writer;
         private string clientName;
-        private bool isRunning = true; // Honi esker, hariak jarraitu behar duen ala ez kontrolatzen dugu
+        private bool isRunning = true;
 
         public Chat(TcpClient client, NetworkStream stream, StreamReader reader, StreamWriter writer, string clientName)
         {
             InitializeComponent();
-            this.WindowState = FormWindowState.Maximized; // Leihoa maximizatuta hasten da
+            this.WindowState = FormWindowState.Maximized;
 
             this.client = client;
             this.stream = stream;
@@ -29,38 +29,34 @@ namespace Cliente
             this.clientName = clientName;
             this.FormClosing += Chat_FormClosing;
 
-            this.t_mensaje.KeyDown += new System.Windows.Forms.KeyEventHandler(this.t_mensaje_KeyDown);
-            this.b_actualizar.Click += new System.EventHandler(this.b_actualizar_Click);
+            this.t_mensaje.KeyDown += new KeyEventHandler(this.t_mensaje_KeyDown);
+            this.b_actualizar.Click += new EventHandler(this.b_actualizar_Click);
 
-            // Zerbitzaritik mezuak jasotzeko hari bat hasten da
-            Task.Run(() => RecibirMensajesServidor());
+            Task.Run(RecibirMensajesServidor);
         }
 
         private void Chat_FormClosing(object sender, FormClosingEventArgs e)
         {
-            EnviarDesconexion(); // Zerbitzarira deskonexio mezua bidaltzen du
-            CerrarConexion(); // Konexioa itxi
-            Application.Exit(); // Aplikazioa guztiz ixten du
+            EnviarDesconexion();
+            CerrarConexion();
+            Application.Exit();
         }
 
         private void b_desconectar_Click(object sender, EventArgs e)
         {
             EnviarDesconexion();
             CerrarConexion();
-            Application.Restart(); // Aplikazioa berrabiarazi (login-era itzultzeko)
+            Application.Restart();
         }
 
-        /// <summary>
-        /// Zerbitzarira deskonexio mezua bidaltzen du.
-        /// </summary>
-        private void EnviarDesconexion()
+        private async void EnviarDesconexion()
         {
             if (client != null && client.Connected)
             {
                 try
                 {
-                    writer.WriteLine($"DISC: {clientName}");
-                    writer.Flush();
+                    await writer.WriteLineAsync($"DISC: {clientName}");
+                    await writer.FlushAsync();
                 }
                 catch (Exception ex)
                 {
@@ -69,9 +65,6 @@ namespace Cliente
             }
         }
 
-        /// <summary>
-        /// Konexioa eta baliabide guztiak ixten ditu.
-        /// </summary>
         private void CerrarConexion()
         {
             isRunning = false;
@@ -81,16 +74,13 @@ namespace Cliente
             client?.Close();
         }
 
-        /// <summary>
-        /// Zerbitzaritik mezuak jasotzen ditu eta prozesatzen ditu.
-        /// </summary>
-        private void RecibirMensajesServidor()
+        private async Task RecibirMensajesServidor()
         {
             try
             {
                 while (isRunning && client.Connected)
                 {
-                    string serverMessage = reader.ReadLine();
+                    string serverMessage = await reader.ReadLineAsync();
                     if (!isRunning) break;
 
                     if (!string.IsNullOrEmpty(serverMessage))
@@ -108,9 +98,6 @@ namespace Cliente
             }
         }
 
-        /// <summary>
-        /// Zerbitzaritik jasotako mezuak prozesatzen ditu.
-        /// </summary>
         private void ProcesarMensaje(string message)
         {
             if (message.StartsWith("USUARIOS_ACTIVOS:"))
@@ -129,6 +116,18 @@ namespace Cliente
             else if (message.StartsWith("API:"))
             {
                 string citasJson = message.Substring("API:".Length).Trim();
+
+                // Si el mensaje indica un error explícito de conexión
+                if (citasJson.StartsWith("ERROR:"))
+                {
+                    listBoxCitas.Invoke(new Action(() =>
+                    {
+                        listBoxCitas.Items.Clear();
+                        listBoxCitas.Items.Add("Ezin da konektatu datu-basearekin"); // Mensaje en euskera
+                    }));
+                    return;
+                }
+
                 if (citasJson == "Gaur ez daude zitak")
                 {
                     listBoxCitas.Invoke(new Action(() =>
@@ -139,21 +138,30 @@ namespace Cliente
                     return;
                 }
 
-                List<dynamic> citas = JsonConvert.DeserializeObject<List<dynamic>>(citasJson);
-                listBoxCitas.Invoke(new Action(() =>
+                try
                 {
-                    listBoxCitas.Items.Clear();
-                    foreach (var cita in citas)
+                    var citas = JsonConvert.DeserializeObject<List<dynamic>>(citasJson);
+                    listBoxCitas.Invoke(new Action(() =>
                     {
-                        listBoxCitas.Items.Add($"{cita.izena} - {cita.hasieraOrdua} a {cita.amaieraOrdua}");
-                    }
-                }));
+                        listBoxCitas.Items.Clear();
+                        foreach (var cita in citas)
+                        {
+                            listBoxCitas.Items.Add($"{cita.izena} - {cita.hasieraOrdua} a {cita.amaieraOrdua}");
+                        }
+                    }));
+                }
+                catch (Exception)
+                {
+                    // Si hay un error al deserializar el JSON, mostramos un mensaje genérico
+                    listBoxCitas.Invoke(new Action(() =>
+                    {
+                        listBoxCitas.Items.Clear();
+                        listBoxCitas.Items.Add("Errorea zitak eskuratzean");
+                    }));
+                }
             }
-        }
 
-        /// <summary>
-        /// Konektatutako erabiltzaileen zerrenda eguneratzen du.
-        /// </summary>
+        }
         private void ActualizarUsuariosActivos(string[] usuarios)
         {
             this.Invoke(new Action(() =>
@@ -175,18 +183,15 @@ namespace Cliente
             }));
         }
 
-        /// <summary>
-        /// Mezu bat bidaltzen du zerbitzarira.
-        /// </summary>
-        private void EnviarMensaje(string mensaje)
+        private async void EnviarMensaje(string mensaje)
         {
             if (!string.IsNullOrWhiteSpace(mensaje))
             {
                 try
                 {
                     t_mensaje.Clear();
-                    writer.WriteLine($"MSG:{clientName}:{mensaje}");
-                    writer.Flush();
+                    await writer.WriteLineAsync($"MSG:{clientName}:{mensaje}");
+                    await writer.FlushAsync();
                 }
                 catch (Exception ex)
                 {
@@ -195,9 +200,6 @@ namespace Cliente
             }
         }
 
-        /// <summary>
-        /// Mezu bat erakusten du interfazean.
-        /// </summary>
         private void MostrarMensaje(string sender, string message)
         {
             this.Invoke(new Action(() =>
@@ -215,12 +217,12 @@ namespace Cliente
             }
         }
 
-        private void b_actualizar_Click(object sender, EventArgs e)
+        private async void b_actualizar_Click(object sender, EventArgs e)
         {
             try
             {
-                writer.WriteLine("API:");
-                writer.Flush();
+                await writer.WriteLineAsync("API:");
+                await writer.FlushAsync();
             }
             catch (Exception ex)
             {
